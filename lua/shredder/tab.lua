@@ -1,15 +1,25 @@
-
 local utils = require("shredder.utils")
+
+local function log(m)
+	--	vim.notify(m, vim.log.levels.INFO)
+end
 
 local M = {
 	id = vim.api.nvim_get_current_tabpage()
 }
+
+function M.log(m)
+	log(m)
+end
 
 ---@class Buf
 ---@field id integer
 ---@field win integer | nil
 ---@type Buf[]
 local buffers = {}
+
+---@type integer | nil
+local filler = nil
 
 ---@class Panel
 ---@field buf Buf | nil
@@ -18,6 +28,24 @@ local buffers = {}
 local panel = {
 	pending = true,
 }
+
+local function panel_validate()
+	if panel.buf == nil then
+		return
+	end
+	if not vim.api.nvim_buf_is_valid(panel.buf.id) then
+		if vim.api.nvim_win_is_valid(panel.buf.win) then
+			vim.api.nvim_win_close(panel.buf.win, true)
+		end
+		panel.buf = nil
+		return
+	end
+	if not vim.api.nvim_win_is_valid(panel.buf.win) then
+		vim.api.nvim_buf_delete(panel.buf.id, { force = true })
+		panel.buf = nil
+		return
+	end
+end
 
 local ns = vim.api.nvim_create_namespace("shredder:active")
 local function panel_redraw()
@@ -43,9 +71,9 @@ local function panel_redraw()
 			virt_lines = {
 				{ { path, "NonText" } },
 			},
-			virt_lines_above = false, -- false = below, true = above
+			virt_lines_above = false,
 		}
-		if opened_buf.win ~= nil then
+		if opened_buf.win ~= nil and opened_buf.win ~= 0 then
 			opts.line_hl_group = "CursorLine"
 		end
 		if count_visible > 1 and opened_buf.win == current then
@@ -121,29 +149,42 @@ local function panel_split(buf)
 end
 
 
-local function panel_sync()
-	do
-		local wins = {}
-		for _, win_id in ipairs(vim.api.nvim_tabpage_list_wins(M.id)) do
-			local buf_id = vim.api.nvim_win_get_buf(win_id)
-			wins[buf_id] = win_id
-		end
-		local new_buffers = {}
-		for _, buf in ipairs(buffers) do
-			if vim.api.nvim_buf_is_valid(buf.id) then
-				table.insert(new_buffers, {
-					id = buf.id,
-					win = wins[buf.id],
-				})
-			end
-		end
-		buffers = new_buffers
+local function buffers_sync()
+	local wins = {}
+	for _, win_id in ipairs(vim.api.nvim_tabpage_list_wins(M.id)) do
+		local buf_id = vim.api.nvim_win_get_buf(win_id)
+		wins[buf_id] = win_id
 	end
+	local new_buffers = {}
+	for _, buf in ipairs(buffers) do
+		if not utils.buffer_is_valid(buf.id) then
+			goto cont
+		end
+		local win = wins[buf.id]
+		if win ~= nil and utils.win_is_floating(win) then
+			goto cont
+		end
+		if win ~= nil then
+			filler = nil
+		end
+		table.insert(new_buffers, {
+			id = buf.id,
+			win = win,
+		})
+		::cont::
+	end
+	buffers = new_buffers
+end
+
+local function panel_sync()
+	panel_validate()
 	if #buffers <= 1 then
-		if panel.pending then
+		log("sync no bufs to show")
+		if panel.buf == nil then
 			return
 		end
 		panel_close()
+		panel.pending = true
 		return
 	end
 	if panel.pending == true then
@@ -156,11 +197,44 @@ local function panel_sync()
 	panel_redraw()
 end
 
-
----@param id integer
-function M.on_tab_enter(id)
+local function sync()
+	buffers_sync()
 	panel_sync()
 end
+
+
+function M.on_win_closed(id)
+	local seen = false
+	for _, buf in ipairs(buffers) do
+		if buf.win == nil then
+			goto cont
+		end
+		if buf.win == id then
+			buf.win = 0
+			goto cont
+		end
+		seen = true
+		::cont::
+	end
+	if seen then
+		return
+	end
+	if filler == id then
+		filler = nil
+	end
+	if filler ~= nil and vim.api.nvim_win_is_valid(filler) then
+		return
+	end
+	if #buffers == 1 then
+		panel_split(buffers[1].id)
+		sync()
+		return
+	end
+	local next_id = vim.api.nvim_create_buf(false, true)
+	filler = panel_split(next_id)
+	panel_sync()
+end
+
 function M.on_tab_closed(id)
 	for _, buf in ipairs(buffers) do
 		if vim.api.nvim_buf_is_valid(buf.id) then
@@ -170,89 +244,14 @@ function M.on_tab_closed(id)
 	buffers = {}
 end
 
-function M.on_win_enter()
-	panel_redraw()
+function M.sync()
+	sync()
 end
-
----@param id integer
-function M.on_win_closed(id)
-	local ok = false
-	local found = nil
-	for _, buf in ipairs(buffers) do
-		if buf.win == nil then
-			goto cont
-		end
-		if buf.win == id then
-			found = buf
-			goto cont
-		end
-		if not vim.api.nvim_win_is_valid(buf.win) then
-			goto cont
-		end
-		ok = true
-		::cont::
-		buf.win = nil
-	end
-	if ok then
-		return
-	end
-	if found ~= nil and vim.api.nvim_buf_is_valid(found.id) then
-		panel_split(found.id)
-		panel_redraw()
-	end
-end
-
----@param id integer
-function M.on_buf_enter(id)
-	if panel.buf ~= nil and panel.buf.id == id then
-		return
-	end
-	if not utils.buffer_is_valid(id) then
-		return
-	end
-	local win = vim.api.nvim_get_current_win()
-	if utils.win_is_floating(win) then
-		return
-	end
-	for _, buf in ipairs(buffers) do
-		if buf.id == id then
-			goto sync
-		end
-	end
-	table.insert(buffers, {
-		id = id,
-	})
-	::sync::
-	panel_sync()
-end
-
----@param win integer
----@param prev Buf
-local function fix_current(win, prev)
-	for _, buf in ipairs(buffers) do
-		if buf.win ~= nil then
-			return
-		end
-	end
-	if prev == nil then
-		prev = buffers[1]
-	end
-	if prev == nil then
-		return
-	end
-	if win ~= nil and vim.api.nvim_win_is_valid(win) then
-		vim.api.nvim_win_set_buf(win, prev.id)
-		return
-	end
-	panel_split(prev.id)
-end
-
-
 
 function M.toggle()
 	if panel.buf == nil then
 		panel.pending = true
-		panel_sync()
+		sync()
 		return
 	end
 	panel_close()
@@ -262,7 +261,17 @@ end
 function M.on_buf_hide(id)
 	if panel.buf ~= nil and panel.buf.id == id then
 		panel_close()
+		return
 	end
+	log("hide buf " .. id)
+end
+
+---@param id integer
+function M.on_buf_add(id)
+	table.insert(buffers, {
+		id = id,
+	})
+	sync()
 end
 
 ---@param id integer
@@ -271,22 +280,23 @@ function M.on_buf_delete(id)
 		panel_close()
 		return
 	end
-	local prev = nil
-	local win = nil
+	local next = nil
 	for index, buf in ipairs(buffers) do
 		if buf.id == id then
-			win = buf.win
 			table.remove(buffers, index)
-			goto cont
+			if buf.win ~= nil and filler ~= nil and vim.api.nvim_win_is_valid(filler) then
+				if next == nil then
+					next = buffers[1]
+				end
+				if next ~= nil then
+					vim.api.nvim_win_set_buf(filler, next.id)
+				end
+			end
+			sync()
+			return
 		end
-		prev = buf
+		next = buf
 	end
-	do
-		return
-	end
-	::cont::
-	fix_current(win, prev)
-	panel_sync()
 end
 
 function M.list(a, b)
@@ -311,7 +321,7 @@ function M.swap(a, b)
 		return "bad index" .. b
 	end
 	buffers[a], buffers[b] = buffers[b], buffers[a]
-	panel_sync()
+	sync()
 end
 
 ---@param source integer
@@ -333,7 +343,7 @@ function M.move_to(source, target)
 	local buf = buffers[source]
 	table.remove(buffers, source)
 	table.insert(buffers, target, buf)
-	panel_sync()
+	sync()
 end
 
 function M.current()
@@ -365,7 +375,6 @@ function M.length()
 	return #buffers
 end
 
-
 ---@param index integer
 ---@return string | nil
 function M.switch_to(index)
@@ -381,8 +390,17 @@ function M.switch_to(index)
 			return
 		end
 		vim.api.nvim_set_current_win(buf.win)
-		panel_sync()
+		sync()
 		return
+	end
+
+	if filler ~= nil then
+		if vim.api.nvim_win_is_valid(filler) then
+			vim.api.nvim_win_set_buf(filler, buf.id)
+			sync()
+			return
+		end
+		filler = nil
 	end
 
 	local switch_buf = nil
@@ -422,7 +440,7 @@ function M.switch_to(index)
 	else
 		panel_split(buf.id)
 	end
-	panel_sync()
+	sync()
 end
 
 return M

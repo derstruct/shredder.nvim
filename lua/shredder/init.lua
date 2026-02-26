@@ -3,6 +3,13 @@ local M = {}
 local man = require("shredder.man")
 local utils = require("shredder.utils")
 
+local function log(args)
+	local ev = args and args.event or "?"
+	local buf = (args and type(args.buf) == "number") and args.buf or nil
+	local msg = ("autocmd %s%s"):format(ev, buf and (" buf=" .. buf) or "")
+	vim.notify(msg, vim.log.levels.DEBUG)
+end
+
 function M.setup(opts)
 	local group = vim.api.nvim_create_augroup("Shredder", { clear = true })
 	if opts.width ~= nil then
@@ -10,13 +17,23 @@ function M.setup(opts)
 	end
 
 
-
-	vim.api.nvim_create_autocmd("BufWinEnter", {
+	vim.api.nvim_create_autocmd({ "BufDelete" }, {
 		group = group,
 		callback = function(args)
+			log(args)
 			local id = args.buf
 			man.guard(function(tab)
-				tab.on_buf_enter(id)
+				tab.on_buf_delete(id)
+			end)
+		end,
+	})
+	vim.api.nvim_create_autocmd("BufAdd", {
+		group = group,
+		callback = function(args)
+			log(args)
+			local id = args.buf
+			man.guard(function(tab)
+				tab.on_buf_add(id)
 			end)
 		end,
 	})
@@ -24,6 +41,7 @@ function M.setup(opts)
 	vim.api.nvim_create_autocmd("WinClosed", {
 		group = group,
 		callback = function(args)
+			log(args)
 			local id = tonumber(args.match)
 			man.guard(function(tab)
 				tab.on_win_closed(id)
@@ -31,14 +49,19 @@ function M.setup(opts)
 		end
 	})
 
-	vim.api.nvim_create_autocmd("WinEnter", {
-		group = group,
-		callback = function()
-			man.guard(function(tab)
-				tab.on_win_enter()
-			end)
-		end
-	})
+	vim.api.nvim_create_autocmd(
+		{ "TabEnter", "WinEnter", "BufWinEnter", },
+		{
+			group = group,
+			callback = function(args)
+				log(args)
+				vim.schedule(function()
+					man.guard(function(tab)
+						tab.sync()
+					end)
+				end)
+			end
+		})
 
 	vim.api.nvim_create_autocmd("TabClosed", {
 		group = group,
@@ -47,44 +70,6 @@ function M.setup(opts)
 		end,
 	})
 
-	vim.api.nvim_create_autocmd("TabEnter", {
-		group = group,
-		callback = function()
-			man.guard(function(tab)
-				tab.on_tab_enter()
-			end)
-		end,
-	})
-
-	vim.api.nvim_create_autocmd("BufWipeout", {
-		group = group,
-		callback = function(args)
-			local id = args.buf
-			man.guard(function(tab)
-				tab.on_buf_delete(id)
-			end)
-		end,
-	})
-
-	vim.api.nvim_create_autocmd("BufDelete", {
-		group = group,
-		callback = function(args)
-			local id = args.buf
-			man.guard(function(tab)
-				tab.on_buf_delete(id)
-			end)
-		end,
-	})
-
-	vim.api.nvim_create_autocmd("BufHidden", {
-		group = group,
-		callback = function(args)
-			local id = args.buf
-			man.guard(function(tab)
-				tab.on_buf_hide(id)
-			end)
-		end,
-	})
 
 	vim.api.nvim_create_user_command("Shoggle", function()
 		man.guard(function(tab)
@@ -450,7 +435,7 @@ function M.move_up(all)
 		if index == 1 then
 			return
 		end
-		local target = index -1
+		local target = index - 1
 		if all then
 			target = 1
 		end
@@ -458,6 +443,7 @@ function M.move_up(all)
 	end)
 	return err
 end
+
 ---@param all boolean
 ---@return string | nil
 function M.move_down(all)
