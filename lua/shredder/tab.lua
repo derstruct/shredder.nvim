@@ -47,6 +47,20 @@ local function panel_validate()
 	end
 end
 
+local last_current = nil
+
+local function get_current()
+	if last_current == nil then
+		return nil
+	end
+	for index, buf in ipairs(buffers) do
+		if buf.win == last_current then
+			return index
+		end
+	end
+end
+
+
 local ns = vim.api.nvim_create_namespace("shredder:active")
 local function panel_redraw()
 	if panel.buf == nil then
@@ -78,6 +92,9 @@ local function panel_redraw()
 		end
 		if count_visible > 1 and opened_buf.win == current then
 			opts.line_hl_group = "Visual"
+		end
+		if opened_buf.win == current then
+			last_current = current
 		end
 		vim.api.nvim_buf_set_extmark(panel.buf.id, ns, row, 0, opts)
 		row = row + 1
@@ -337,9 +354,6 @@ function M.move_to(source, target)
 	if target > #buffers or target < 1 then
 		return "bad index" .. target
 	end
-	if source < target then
-		target = target - 1
-	end
 	local buf = buffers[source]
 	table.remove(buffers, source)
 	table.insert(buffers, target, buf)
@@ -347,13 +361,7 @@ function M.move_to(source, target)
 end
 
 function M.current()
-	local current = vim.api.nvim_get_current_win()
-	for index, buf in ipairs(buffers) do
-		if buf.win ~= nil and buf.win == current then
-			return index
-		end
-	end
-	return nil
+	return get_current()
 end
 
 function M.current_buffer()
