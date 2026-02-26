@@ -21,6 +21,9 @@ local buffers = {}
 ---@type integer | nil
 local filler = nil
 
+---@type integer | nil
+local current_win = nil
+
 ---@class Panel
 ---@field buf Buf | nil
 ---@field pending boolean
@@ -47,14 +50,13 @@ local function panel_validate()
 	end
 end
 
-local last_current = nil
 
 local function get_current()
-	if last_current == nil then
+	if current_win == nil then
 		return nil
 	end
 	for index, buf in ipairs(buffers) do
-		if buf.win == last_current then
+		if buf.win == current_win then
 			return index
 		end
 	end
@@ -67,20 +69,12 @@ local function panel_redraw()
 		return
 	end
 	vim.api.nvim_win_set_width(panel.buf.win, utils.get_width())
-	local current = vim.api.nvim_get_current_win()
 	local buf = vim.bo[panel.buf.id]
 	buf.modifiable = true
 	local row = 0
-	local count_visible = 0
-	for _, opened_buf in ipairs(buffers) do
-		if opened_buf.win ~= nil then
-			count_visible = count_visible + 1
-		end
-	end
 	vim.api.nvim_buf_set_lines(panel.buf.id, 0, -1, false, {})
 	for _, opened_buf in ipairs(buffers) do
 		local name, path = utils.display_path(vim.api.nvim_buf_get_name(opened_buf.id))
-		vim.api.nvim_buf_set_lines(panel.buf.id, row, row + 1, false, { name })
 		local opts = {
 			virt_lines = {
 				{ { path, "NonText" } },
@@ -89,13 +83,11 @@ local function panel_redraw()
 		}
 		if opened_buf.win ~= nil and opened_buf.win ~= 0 then
 			opts.line_hl_group = "CursorLine"
+			if opened_buf.win == current_win then
+				name = "▎ " .. name
+			end
 		end
-		if count_visible > 1 and opened_buf.win == current then
-			opts.line_hl_group = "Visual"
-		end
-		if opened_buf.win == current then
-			last_current = current
-		end
+		vim.api.nvim_buf_set_lines(panel.buf.id, row, row + 1, false, { name })
 		vim.api.nvim_buf_set_extmark(panel.buf.id, ns, row, 0, opts)
 		row = row + 1
 	end
@@ -115,7 +107,9 @@ local function panel_open()
 	local win_id = vim.api.nvim_get_current_win()
 	local win = vim.wo[win_id]
 	win.number = true
+	win.signcolumn = 'no'
 	win.relativenumber = false
+	win.numberwidth = 3
 	win.signcolumn = "no"
 	win.wrap = false
 	vim.api.nvim_win_set_buf(win_id, buf_id)
@@ -173,6 +167,9 @@ local function buffers_sync()
 		wins[buf_id] = win_id
 	end
 	local new_buffers = {}
+	local current_set = false
+	local current_found = true
+	local current = vim.api.nvim_get_current_win()
 	for _, buf in ipairs(buffers) do
 		if not utils.buffer_is_valid(buf.id) then
 			goto cont
@@ -182,6 +179,11 @@ local function buffers_sync()
 			goto cont
 		end
 		if win ~= nil then
+			if win == current then
+				current_set = true
+			elseif current_win ~= nil and current_win == win then
+				current_found = true
+			end
 			filler = nil
 		end
 		table.insert(new_buffers, {
@@ -189,6 +191,11 @@ local function buffers_sync()
 			win = win,
 		})
 		::cont::
+	end
+	if current_set then
+		current_win = current
+	elseif not current_found then
+		current_win = nil
 	end
 	buffers = new_buffers
 end
@@ -392,9 +399,8 @@ function M.switch_to(index)
 		return "no buffer #" .. index
 	end
 
-	local current = vim.api.nvim_get_current_win()
 	if buf.win ~= nil then
-		if buf.win == current then
+		if buf.win == vim.api.nvim_get_current_win() then
 			return
 		end
 		vim.api.nvim_set_current_win(buf.win)
@@ -408,46 +414,22 @@ function M.switch_to(index)
 			sync()
 			return
 		end
-		filler = nil
 	end
 
-	local switch_buf = nil
-	---
-	---@type Buf[]
-	local visible_buffers = {}
+	if current_win ~= nil then
+		vim.api.nvim_win_set_buf(current_win, buf.id)
+		sync()
+		return
+	end
+
 	for _, other_buf in ipairs(buffers) do
-		if other_buf.win == nil then
-			goto cont
+		if other_buf.win ~= nil then
+			vim.api.nvim_win_set_buf(other_buf.win, buf.id)
+			sync()
+			return
 		end
-		if other_buf.win == current then
-			switch_buf = other_buf
-			break
-		end
-		table.insert(visible_buffers, other_buf)
-		::cont::
 	end
-
-	if switch_buf == nil and #visible_buffers == 1 then
-		switch_buf = visible_buffers[1]
-	end
-
-	if switch_buf == nil and #visible_buffers ~= 1 then
-		for _, it in ipairs(vim.fn.getbufinfo({ buflisted = 1 })) do
-			for _, visible_buf in ipairs(visible_buffers) do
-				if visible_buf.id == it.bufnr then
-					switch_buf = visible_buf
-					goto brk
-				end
-			end
-		end
-		switch_buf = visible_buffers[1]
-		::brk::
-	end
-	if switch_buf ~= nil then
-		vim.api.nvim_win_set_buf(switch_buf.win, buf.id)
-	else
-		panel_split(buf.id)
-	end
+	panel_split(buf.id)
 	sync()
 end
 
