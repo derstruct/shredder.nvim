@@ -94,6 +94,42 @@ local function panel_redraw()
 	buf.modifiable = false
 end
 
+---@class WindowDefaults
+---@field number boolean
+---@field signcolumn string
+---@field relativenumber boolean
+---@field numberwidth integer
+---@field wrap boolean
+---@field winfixwidth boolean
+---@type WindowDefaults | nil
+local defaults = nil
+
+
+local function save_defaults(win_id)
+	if defaults ~= nil then
+		return
+	end
+	local win = vim.wo[win_id]
+	defaults = {
+		number = win.number,
+		signcolumn = win.signcolumn,
+		relativenumber = win.relativenumber,
+		numberwidth = win.numberwidth,
+		wrap = win.wrap,
+		winfixwidth = win.winfixwidth,
+	}
+end
+
+local function apply_defaults(win_id)
+	local win = vim.wo[win_id]
+	win.number = defaults.number
+	win.signcolumn = defaults.signcolumn
+	win.relativenumber = defaults.relativenumber
+	win.numberwidth = defaults.numberwidth
+	win.wrap = defaults.wrap
+	win.winfixwidth = defaults.winfixwidth
+end
+
 local function panel_open()
 	local current = vim.api.nvim_get_current_win()
 	local buf_id = vim.api.nvim_create_buf(false, true)
@@ -105,6 +141,7 @@ local function panel_open()
 	buf.undofile = false
 	vim.cmd("topleft vsplit")
 	local win_id = vim.api.nvim_get_current_win()
+	save_defaults(win_id)
 	local win = vim.wo[win_id]
 	win.number = true
 	win.signcolumn = 'no'
@@ -112,10 +149,10 @@ local function panel_open()
 	win.numberwidth = 3
 	win.signcolumn = "no"
 	win.wrap = false
+	win.winfixwidth = true
 	vim.api.nvim_win_set_buf(win_id, buf_id)
 	vim.api.nvim_set_option_value("winfixbuf", true, { win = win_id })
 	vim.api.nvim_win_set_width(win_id, utils.get_width())
-	win.winfixwidth = true
 	vim.api.nvim_set_current_win(current)
 	panel = {
 		buf = {
@@ -153,6 +190,7 @@ local function panel_split(buf)
 	vim.cmd("rightbelow vsplit")
 	local win_id = vim.api.nvim_get_current_win()
 	vim.api.nvim_win_set_buf(win_id, buf)
+	apply_defaults(win_id)
 	if current ~= panel.buf.win then
 		vim.api.nvim_set_current_win(current)
 	end
