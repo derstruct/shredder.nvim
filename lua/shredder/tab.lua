@@ -84,7 +84,7 @@ local function panel_redraw()
 		if opened_buf.win ~= nil and opened_buf.win ~= 0 then
 			opts.line_hl_group = "CursorLine"
 			if opened_buf.win == current_win then
-				name = "▎ " .. name
+				name = "▎" .. name
 			end
 		end
 		vim.api.nvim_buf_set_lines(panel.buf.id, row, row + 1, false, { name })
