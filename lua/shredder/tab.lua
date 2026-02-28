@@ -186,6 +186,35 @@ local function panel_split(buf)
 		return
 	end
 	local current = vim.api.nvim_get_current_win()
+	local wins = {}
+	for _, buf in ipairs(buffers) do
+		if buf.win ~= nil then
+			wins[buf.win] = true
+		end
+	end
+	for _, win_id in ipairs(vim.api.nvim_tabpage_list_wins(M.id)) do
+		if wins[win_id] == true then
+			goto cont
+		end
+		if utils.win_is_floating(win_id) then
+			goto cont
+		end
+		local buf_id = vim.api.nvim_win_get_buf(win_id)
+		if vim.bo[buf_id].buftype ~= "" then
+			goto cont
+		end
+		if vim.api.nvim_buf_get_name(buf_id) ~= "" then
+			goto cont
+		end
+		vim.api.nvim_win_set_buf(win_id, buf)
+		if current == panel.buf.win then
+			vim.api.nvim_set_current_win(win_id)
+		end
+		do
+			return win_id
+		end
+		::cont::
+	end
 	vim.api.nvim_set_current_win(panel.buf.win)
 	vim.cmd("rightbelow vsplit")
 	local win_id = vim.api.nvim_get_current_win()
