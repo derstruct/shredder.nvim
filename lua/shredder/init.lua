@@ -8,8 +8,7 @@ local function log(args)
 	local ev = args and args.event or "?"
 	local buf = (args and type(args.buf) == "number") and args.buf or nil
 	local msg = ("autocmd %s%s"):format(ev, buf and (" buf=" .. buf) or "")
-	vim.notify(msg, vim.log.levels.DEBUG) 
-	]]--
+	vim.notify(msg, vim.log.levels.DEBUG) ]] --
 end
 
 function M.setup(opts)

@@ -1,16 +1,15 @@
 local utils = require("shredder.utils")
 
 local function log(m)
-	--	vim.notify(m, vim.log.levels.INFO)
+	-- vim.notify(m, vim.log.levels.INFO)
 end
 
 local M = {
 	id = vim.api.nvim_get_current_tabpage()
 }
 
-function M.log(m)
-	log(m)
-end
+---@type table<integer, boolean>
+local floating_buffers = {}
 
 ---@class Buf
 ---@field id integer
@@ -232,17 +231,26 @@ local function buffers_sync()
 	for _, win_id in ipairs(vim.api.nvim_tabpage_list_wins(M.id)) do
 		local buf_id = vim.api.nvim_win_get_buf(win_id)
 		wins[buf_id] = win_id
+		if floating_buffers[buf_id] then
+			table.insert(buffers, {
+				id = buf_id,
+			})
+		end
 	end
+	local new_floating = {}
 	local new_buffers = {}
 	local current_set = false
 	local current_found = true
 	local current = vim.api.nvim_get_current_win()
 	for _, buf in ipairs(buffers) do
 		if not utils.buffer_is_valid(buf.id) then
+			log("invalid " .. buf.id)
 			goto cont
 		end
 		local win = wins[buf.id]
 		if win ~= nil and utils.win_is_floating(win) then
+			new_floating[buf.id] = true
+			log("floating " .. buf.id)
 			goto cont
 		end
 		if win ~= nil then
@@ -253,6 +261,7 @@ local function buffers_sync()
 			end
 			filler = nil
 		end
+		log("adding " .. buf.id)
 		table.insert(new_buffers, {
 			id = buf.id,
 			win = win,
@@ -264,6 +273,7 @@ local function buffers_sync()
 	elseif not current_found then
 		current_win = nil
 	end
+	floating_buffers = new_floating
 	buffers = new_buffers
 end
 
@@ -292,7 +302,6 @@ local function sync()
 	buffers_sync()
 	panel_sync()
 end
-
 
 function M.on_win_closed(id)
 	local seen = false
