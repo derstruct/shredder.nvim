@@ -313,7 +313,7 @@ function M.shred()
 		::number::
 		if s == state.Switch or s == state.Move or s == state.Wipe then
 			if k == "e" then
-				index = index * 10
+				index = index + 10
 				goto continue
 			end
 			local n = tonumber(k)
