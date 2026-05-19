@@ -4,11 +4,41 @@ local man = require("shredder.man")
 local utils = require("shredder.utils")
 
 local function log(args)
-	--[[
 	local ev = args and args.event or "?"
 	local buf = (args and type(args.buf) == "number") and args.buf or nil
 	local msg = ("autocmd %s%s"):format(ev, buf and (" buf=" .. buf) or "")
-	vim.notify(msg, vim.log.levels.DEBUG) ]] --
+	-- vim.notify(msg, vim.log.levels.DEBUG)
+end
+
+---@param target string | integer | nil
+---@param force boolean
+---@return string | nil
+local function tabclose(target, force)
+	local command = "tabclose"
+	if force then
+		command = command .. "!"
+	end
+	if target ~= nil then
+		command = command .. " " .. target
+	end
+	local ok, err = pcall(vim.cmd, command)
+	if not ok then
+		return err
+	end
+end
+
+---@param buf integer
+---@param force boolean
+---@return string | nil
+local function wipe_buf(buf, force)
+	local command = "bw"
+	if force then
+		command = command .. "!"
+	end
+	local ok, err = pcall(vim.cmd, command .. " " .. buf)
+	if not ok then
+		return err
+	end
 end
 
 function M.setup(opts)
@@ -33,8 +63,10 @@ function M.setup(opts)
 		callback = function(args)
 			log(args)
 			local id = args.buf
-			man.guard(function(tab)
-				tab.on_buf_add(id)
+			vim.schedule(function()
+				man.guard(function(tab)
+					tab.on_buf_add(id)
+				end)
 			end)
 		end,
 	})
@@ -257,7 +289,7 @@ function M.shred()
 			end
 			if k == "d" then
 				if tabs then
-					vim.cmd("tabclose")
+					err = tabclose(nil, force)
 				else
 					err = M.wipe_current(force)
 				end
@@ -267,7 +299,7 @@ function M.shred()
 				if tabs then
 					local cur = vim.fn.tabpagenr()
 					if cur > 1 then
-						vim.cmd(("tabclose %d"):format(cur - 1))
+						err = tabclose(cur - 1, force)
 					end
 				else
 					err = M.wipe_up(force, false)
@@ -279,7 +311,7 @@ function M.shred()
 					local cur = vim.fn.tabpagenr()
 					local last = vim.fn.tabpagenr("$")
 					if cur < last then
-						vim.cmd(("tabclose %d"):format(cur + 1))
+						err = tabclose(cur + 1, force)
 					end
 				else
 					err = M.wipe_down(force, false)
@@ -288,7 +320,7 @@ function M.shred()
 			end
 			if k == "K" or k == "H" then
 				if tabs then
-					vim.cmd("tabclose 1")
+					err = tabclose(1, force)
 				else
 					err = M.wipe_up(force, true)
 				end
@@ -296,7 +328,7 @@ function M.shred()
 			end
 			if k == "J" or k == "L" then
 				if tabs then
-					vim.cmd("tabclose $")
+					err = tabclose("$", force)
 				else
 					err = M.wipe_down(force, true)
 				end
@@ -307,7 +339,7 @@ function M.shred()
 				s = state.Wipe
 				goto number
 			end
-			err = "Unrecognized comman"
+			err = "Unrecognized command"
 			break
 		end
 		::number::
@@ -339,7 +371,7 @@ function M.shred()
 				end
 			else
 				if tabs then
-					vim.cmd("tabclose " .. index)
+					err = tabclose(index, force)
 				else
 					err = M.wipe(index, force)
 				end
@@ -476,15 +508,14 @@ end
 ---@return string | nil
 function M.wipe(index, force, tab)
 	tab = tab or man.tab()
+	if index == nil then
+		return "buffer not found"
+	end
 	local buf = tab.buffer(index)
 	if buf == nil then
 		return "buffer #" .. index .. " not found"
 	end
-	local command = "bw"
-	if force then
-		command = command .. "!"
-	end
-	vim.cmd(command .. " " .. buf)
+	return wipe_buf(buf, force)
 end
 
 ---
@@ -493,6 +524,9 @@ end
 function M.wipe_current(force)
 	local tab = man.tab()
 	local current = tab.current()
+	if current == nil then
+		return "current buffer not found"
+	end
 	return M.wipe(current, force, tab)
 end
 
@@ -504,10 +538,25 @@ function M.wipe_up(force, all)
 	if index == nil then
 		return "current buffer not found"
 	end
-	for i = 1, index - 1 do
-		M.wipe(i, force, tab)
-		if not all then
-			break
+	if index == 1 then
+		return
+	end
+	local first = index - 1
+	if all then
+		first = 1
+	end
+	local bufs = {}
+	for i = first, index - 1 do
+		local buf = tab.buffer(i)
+		if buf == nil then
+			return "buffer #" .. i .. " not found"
+		end
+		table.insert(bufs, buf)
+	end
+	for _, buf in ipairs(bufs) do
+		local err = wipe_buf(buf, force)
+		if err ~= nil then
+			return err
 		end
 	end
 end
@@ -522,10 +571,25 @@ function M.wipe_down(force, all)
 	if index == nil then
 		return "current buffer not found"
 	end
-	for i = index + 1, tab.length() do
-		M.wipe(i, force, tab)
-		if not all then
-			break
+	if index == tab.length() then
+		return
+	end
+	local last = index + 1
+	if all then
+		last = tab.length()
+	end
+	local bufs = {}
+	for i = index + 1, last do
+		local buf = tab.buffer(i)
+		if buf == nil then
+			return "buffer #" .. i .. " not found"
+		end
+		table.insert(bufs, buf)
+	end
+	for _, buf in ipairs(bufs) do
+		local err = wipe_buf(buf, force)
+		if err ~= nil then
+			return err
 		end
 	end
 end
